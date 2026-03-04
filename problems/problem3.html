@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>CPSC 487/587</title>
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.19.1/dist/lil-gui.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/10.3.0/math.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/quaternion@1.5.1/quaternion.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/numeric@1.2.6/numeric-1.2.6.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stats.js@0.17.0/build/stats.min.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+              "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+              "three/": "https://unpkg.com/three@0.160.0/"
+            }
+        }
+    </script>
+</head>
+<body>
+<script type="module">
+    import {ThreeEngine} from "../js/utils/utils_three.js";
+    import {mul_matrix_matrix} from "../js/utils/utils_math.js";
+
+    // SO(2) Visualization: Point rotation using 2D rotation matrices
+    // SO(2) is the Special Orthogonal group in 2D - the set of all 2x2 rotation matrices
+    // R(θ) = [[cos(θ), -sin(θ)],
+    //         [sin(θ),  cos(θ)]]
+
+    // Create a 2D engine
+    let engine = ThreeEngine.new_default_2d();
+
+    // GUI settings
+    let settings = {
+        theta: 0,           // rotation angle in radians
+        point_x: 2,         // original point x coordinate
+        point_y: 1          // original point y coordinate
+    };
+
+    // Create GUI
+    let gui = new lil.GUI();
+    gui.add(settings, 'theta', -Math.PI, Math.PI).name('θ (radians)');
+    gui.add(settings, 'point_x', -3, 3).name('Point X');
+    gui.add(settings, 'point_y', -3, 3).name('Point Y');
+
+    // Function to create SO(2) rotation matrix
+    function so2_rotation_matrix(theta) {
+        return [
+            [Math.cos(theta), -Math.sin(theta)],
+            [Math.sin(theta),  Math.cos(theta)]
+        ];
+    }
+
+    // Function to apply SO(2) rotation to a 2D point
+    function apply_so2_rotation(matrix, point) {
+        let result = mul_matrix_matrix(matrix, [[point[0]], [point[1]]]);
+        return [result[0][0], result[1][0]];
+    }
+
+    // Animation loop
+    engine.animation_loop(function() {
+        // Original point (in 2D, z=0)
+        let original_point = [settings.point_x, settings.point_y, 0];
+        
+        // Create SO(2) rotation matrix
+        let R = so2_rotation_matrix(settings.theta);
+        
+        // Apply rotation to the point
+        let rotated_2d = apply_so2_rotation(R, [settings.point_x, settings.point_y]);
+        let rotated_point = [rotated_2d[0], rotated_2d[1], 0];
+        
+        // Draw original point (blue)
+        engine.draw_debug_sphere(original_point, 0.1, 0x0000ff);
+        
+        // Draw rotated point (orange)
+        engine.draw_debug_sphere(rotated_point, 0.1, 0xff8800);
+        
+        // Draw vector from origin to original point (blue)
+        engine.draw_debug_vector([0, 0, 0], original_point, 0.02, 0.15, 0x0000ff);
+        
+        // Draw vector from origin to rotated point (orange)
+        engine.draw_debug_vector([0, 0, 0], rotated_point, 0.02, 0.15, 0xff8800);
+        
+        // Draw line connecting original to rotated point (dashed effect with green)
+        engine.draw_debug_line(original_point, rotated_point, false, 0.01, 0x00aa00);
+    });
+
+</script>
+</body>
+</html>
