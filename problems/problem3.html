@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
     <title>CPSC 487/587</title>
+    <script src="../../js/setup/setup_mathjax.js"></script>
     <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.19.1/dist/lil-gui.umd.min.js"></script>
@@ -19,73 +20,80 @@
     </script>
 </head>
 <body>
-<script type="module">
-    import {ThreeEngine} from "../js/utils/utils_three.js";
-    import {mul_matrix_matrix} from "../js/utils/utils_math.js";
+    <script type="module">
 
-    // SO(2) Visualization: Point rotation using 2D rotation matrices
-    // SO(2) is the Special Orthogonal group in 2D - the set of all 2x2 rotation matrices
-    // R(θ) = [[cos(θ), -sin(θ)],
-    //         [sin(θ),  cos(θ)]]
+        import { ThreeEngine, get_default_lil_gui, refresh_displays } from "../../js/utils/utils_three.js";
+        import { mul_matrix_matrix } from "../../js/utils/utils_math.js";
+        import { ParametricCurveUnitCircle } from "../../js/utils/utils_parametric_curves.js";
 
-    // Create a 2D engine
-    let engine = ThreeEngine.new_default_2d();
+        function create_rot_mat(theta) {
+            const cos = Math.cos(theta);
+            const sin = Math.sin(theta);
+            return [[cos, -sin], [sin, cos]];
+        }
 
-    // GUI settings
-    let settings = {
-        theta: 0,           // rotation angle in radians
-        point_x: 2,         // original point x coordinate
-        point_y: 1          // original point y coordinate
-    };
+        function getDet(matrix) {
+            return matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
+        }
 
-    // Create GUI
-    let gui = new lil.GUI();
-    gui.add(settings, 'theta', -Math.PI, Math.PI).name('θ (radians)');
-    gui.add(settings, 'point_x', -3, 3).name('Point X');
-    gui.add(settings, 'point_y', -3, 3).name('Point Y');
-
-    // Function to create SO(2) rotation matrix
-    function so2_rotation_matrix(theta) {
-        return [
-            [Math.cos(theta), -Math.sin(theta)],
-            [Math.sin(theta),  Math.cos(theta)]
-        ];
-    }
-
-    // Function to apply SO(2) rotation to a 2D point
-    function apply_so2_rotation(matrix, point) {
-        let result = mul_matrix_matrix(matrix, [[point[0]], [point[1]]]);
-        return [result[0][0], result[1][0]];
-    }
-
-    // Animation loop
-    engine.animation_loop(function() {
-        // Original point (in 2D, z=0)
-        let original_point = [settings.point_x, settings.point_y, 0];
+        const engine = ThreeEngine.new_default_2d();
+        const MESH_INDEX = 0;
         
-        // Create SO(2) rotation matrix
-        let R = so2_rotation_matrix(settings.theta);
+        engine.add_standard2Dshape_as_mesh_object(0x00eeff);
         
-        // Apply rotation to the point
-        let rotated_2d = apply_so2_rotation(R, [settings.point_x, settings.point_y]);
-        let rotated_point = [rotated_2d[0], rotated_2d[1], 0];
-        
-        // Draw original point (blue)
-        engine.draw_debug_sphere(original_point, 0.1, 0x0000ff);
-        
-        // Draw rotated point (orange)
-        engine.draw_debug_sphere(rotated_point, 0.1, 0xff8800);
-        
-        // Draw vector from origin to original point (blue)
-        engine.draw_debug_vector([0, 0, 0], original_point, 0.02, 0.15, 0x0000ff);
-        
-        // Draw vector from origin to rotated point (orange)
-        engine.draw_debug_vector([0, 0, 0], rotated_point, 0.02, 0.15, 0xff8800);
-        
-        // Draw line connecting original to rotated point (dashed effect with green)
-        engine.draw_debug_line(original_point, rotated_point, false, 0.01, 0x00aa00);
-    });
+        const originalMeshPoints = engine.get_local_vertex_positions_of_mesh_object(MESH_INDEX);
+        const originalWireframePoints = engine.get_local_vertex_positions_of_mesh_object_wireframe(MESH_INDEX);
 
-</script>
+        const unitCircle = new ParametricCurveUnitCircle();
+        unitCircle.spawn_static_parametric_curve(engine.scene);
+
+        const settings = {
+            drawPoints: true,
+            drawWireframe: true,
+            drawMesh: false,
+            pointSize: 0.02,
+            theta: 0,
+            determinant: "1"
+        };
+
+        const gui = get_default_lil_gui();
+        
+        // Display controls
+        gui.add(settings, 'drawPoints').name('Draw Points');
+        gui.add(settings, 'drawWireframe').name('Draw Wireframe');
+        gui.add(settings, 'drawMesh').name('Draw Mesh');
+        gui.add(settings, 'pointSize', 0.001, 0.03).name('Point Size');
+
+        const matrixFolder = gui.addFolder('Matrix Controls');
+        matrixFolder.add(settings, 'theta', -Math.PI, Math.PI).name('theta');
+        matrixFolder.add({ reset: () => { settings.theta = 0; refresh_displays(gui); } }, 'reset').name('Reset Matrix');
+        matrixFolder.add(settings, 'determinant').name('Determinant').disable();
+
+        // ---- Animation Loop ----        
+        engine.animation_loop(() => {
+            const rotMat = create_rot_mat(settings.theta);
+            const c1 = [rotMat[0][0], rotMat[1][0]];
+            const c2 = [rotMat[0][1], rotMat[1][1]];
+
+            engine.draw_debug_vector([0, 0], c1, 0.035, undefined, 0xFF0000);
+            engine.draw_debug_vector([0, 0], c2, 0.035, undefined, 0x008000);
+
+            settings.determinant = getDet(rotMat).toFixed(4);
+            refresh_displays(gui);
+
+            const transformedMeshPoints = originalMeshPoints.map(p => mul_matrix_matrix(rotMat, p));
+            const transformedWireframePoints = originalWireframePoints.map(p => mul_matrix_matrix(rotMat, p));
+
+            engine.update_vertex_positions_of_mesh_object(MESH_INDEX, transformedMeshPoints);
+            engine.update_vertex_positions_of_mesh_object_wireframe(MESH_INDEX, transformedWireframePoints);
+
+            if (settings.drawPoints) {
+                transformedMeshPoints.forEach(point => {engine.draw_debug_sphere(point, settings.pointSize, 0xFFFF00);});
+            }
+
+            engine.mesh_objects[MESH_INDEX].visible = settings.drawMesh;
+            engine.set_mesh_object_wireframe_visibility(MESH_INDEX, settings.drawWireframe);
+        });
+    </script>
 </body>
 </html>
