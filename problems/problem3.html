@@ -33,16 +33,14 @@
         }
 
         function getDet(matrix) {
-            return matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0];
+            return matrix[0][0] * matrix[1][1] - matrix[0][1] * matrix[1][0]; // ad - bc since we're dealing with 2x2 matrices
         }
 
         const engine = ThreeEngine.new_default_2d();
-        const MESH_INDEX = 0;
-        
         engine.add_standard2Dshape_as_mesh_object(0x00eeff);
         
-        const originalMeshPoints = engine.get_local_vertex_positions_of_mesh_object(MESH_INDEX);
-        const originalWireframePoints = engine.get_local_vertex_positions_of_mesh_object_wireframe(MESH_INDEX);
+        const originalMeshPoints = engine.get_local_vertex_positions_of_mesh_object(0);
+        const originalWireframePoints = engine.get_local_vertex_positions_of_mesh_object_wireframe(0);
 
         const unitCircle = new ParametricCurveUnitCircle();
         unitCircle.spawn_static_parametric_curve(engine.scene);
@@ -62,7 +60,7 @@
         gui.add(settings, 'drawPoints').name('Draw Points');
         gui.add(settings, 'drawWireframe').name('Draw Wireframe');
         gui.add(settings, 'drawMesh').name('Draw Mesh');
-        gui.add(settings, 'pointSize', 0.001, 0.03).name('Point Size');
+        gui.add(settings, 'pointSize', 0.001, 0.05).name('Point Size');
 
         const matrixFolder = gui.addFolder('Matrix Controls');
         matrixFolder.add(settings, 'theta', -Math.PI, Math.PI).name('theta');
@@ -75,8 +73,8 @@
             const c1 = [rotMat[0][0], rotMat[1][0]];
             const c2 = [rotMat[0][1], rotMat[1][1]];
 
-            engine.draw_debug_vector([0, 0], c1, 0.035, undefined, 0xFF0000);
-            engine.draw_debug_vector([0, 0], c2, 0.035, undefined, 0x008000);
+            engine.draw_debug_vector([0, 0], c1, 0.02, undefined, 0xFF0000);
+            engine.draw_debug_vector([0, 0], c2, 0.02, undefined, 0x008000);
 
             settings.determinant = getDet(rotMat).toFixed(4);
             refresh_displays(gui);
@@ -84,15 +82,15 @@
             const transformedMeshPoints = originalMeshPoints.map(p => mul_matrix_matrix(rotMat, p));
             const transformedWireframePoints = originalWireframePoints.map(p => mul_matrix_matrix(rotMat, p));
 
-            engine.update_vertex_positions_of_mesh_object(MESH_INDEX, transformedMeshPoints);
-            engine.update_vertex_positions_of_mesh_object_wireframe(MESH_INDEX, transformedWireframePoints);
+            engine.update_vertex_positions_of_mesh_object(0, transformedMeshPoints);
+            engine.update_vertex_positions_of_mesh_object_wireframe(0, transformedWireframePoints);
 
             if (settings.drawPoints) {
                 transformedMeshPoints.forEach(point => {engine.draw_debug_sphere(point, settings.pointSize, 0xFFFF00);});
             }
 
-            engine.mesh_objects[MESH_INDEX].visible = settings.drawMesh;
-            engine.set_mesh_object_wireframe_visibility(MESH_INDEX, settings.drawWireframe);
+            engine.mesh_objects[0].visible = settings.drawMesh;
+            engine.set_mesh_object_wireframe_visibility(0, settings.drawWireframe);
         });
     </script>
 </body>
