@@ -1,3 +1,9 @@
+import * as THREE from 'three';
+import { OrbitControls }     from 'three/examples/jsm/controls/OrbitControls.js';
+import { TransformControls } from 'three/examples/jsm/controls/TransformControls.js';
+import { GLTFLoader }        from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { STLLoader }         from 'three/examples/jsm/loaders/STLLoader.js';
+import { OBJLoader }         from 'three/examples/jsm/loaders/OBJLoader.js';
 import {unroll_matrix_to_list} from "./utils_math.js";
 
 export class ThreeEngine {
@@ -67,7 +73,7 @@ export class ThreeEngine {
                 document.body.appendChild(renderer.domElement);
             }
         });
-        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.5); // soft white light
@@ -311,7 +317,7 @@ export class ThreeEngine {
             this.gizmo_controller_objects.push(cube);
             this.scene.add(cube);
 
-            let transform_controls = new THREE.TransformControls(this.camera, this.renderer.domElement);
+            let transform_controls = new TransformControls(this.camera, this.renderer.domElement);
 
             transform_controls.addEventListener('dragging-changed', event => {
                 this.controls.enabled = !event.value;
@@ -567,7 +573,7 @@ export function threejs_responsive_canvas(camera, renderer) {
 
 export function load_gltf(path, scene) {
     return new Promise((resolve, reject) => {
-        const loader = new THREE.GLTFLoader();
+        const loader = new GLTFLoader();
         loader.load(
             path,
             function(gltf) {
@@ -605,7 +611,7 @@ export function load_gltf(path, scene) {
 
 export function load_stl(path, scene, wireframe=false, color=0x00ff00) {
     return new Promise((resolve, reject) => {
-        const loader = new THREE.STLLoader();
+        const loader = new STLLoader();
         loader.load(
             path,
             function (geometry) {
@@ -629,7 +635,7 @@ export function load_stl(path, scene, wireframe=false, color=0x00ff00) {
 }
 
 export function load_obj_from_string(scene, string, color=0x00ff00) {
-    const loader = new THREE.OBJLoader();
+    const loader = new OBJLoader();
     const object = loader.parse(string);
 
     let out;

@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Protein Backbone Visualizer</title>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.19.1/dist/lil-gui.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjs/10.3.0/math.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/quaternion@1.5.1/quaternion.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/numeric@1.2.6/numeric-1.2.6.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/stats.js@0.17.0/build/stats.min.js"></script>
+    <script type="importmap">
+        {
+            "imports": {
+                "three":  "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/": "https://unpkg.com/three@0.160.0/"
+            }
+        }
+    </script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { overflow: hidden; background: #0d0d1a; font-family: 'Courier New', monospace; }
+
+        #upload-bar {
+            position: fixed; top: 0; left: 0; right: 0; height: 42px; z-index: 200;
+            background: rgba(10, 10, 30, 0.92);
+            backdrop-filter: blur(12px);
+            border-bottom: 1px solid rgba(80, 100, 220, 0.35);
+            display: flex; align-items: center; gap: 8px; padding: 0 14px;
+        }
+        #upload-bar button {
+            padding: 4px 11px;
+            background: rgba(60, 70, 160, 0.55);
+            color: #ccd;
+            border: 1px solid rgba(100, 110, 220, 0.5);
+            border-radius: 4px; cursor: pointer;
+            font-family: inherit; font-size: 12px;
+            transition: background 0.15s;
+        }
+        #upload-bar button:hover { background: rgba(90, 100, 200, 0.8); color: #fff; }
+        #protein-name { color: #fff; font-size: 12px; margin-left: 6px; }
+
+        canvas {
+            position: fixed !important;
+            top: 42px !important;
+            left: 0 !important;
+        }
+
+        #popup-box {
+            position: fixed;
+            bottom: 65px;
+            left: 8px;
+            width: 350px;
+            z-index: 100;
+            background: rgba(8, 8, 24, 0.90);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(80, 100, 220, 0.3);
+            border-radius: 4px;
+            padding: 10px 12px;
+            font-size: 11px;
+            color: #bbc;
+        }
+        #popup-box .pinstr {
+            color: #fff;
+            font-size: 10.5px;
+            line-height: 1.5;
+            padding-bottom: 7px;
+            margin-bottom: 7px;
+            border-bottom: 1px solid rgba(80, 100, 220, 0.2);
+        }
+        #popup-box .ptitle {
+            color: #ffcc66;
+            font-size: 11px;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+        #popup-box .psub {
+            color: #99aaff;
+            font-size: 10px;
+            margin: 6px 0 2px;
+        }
+        #popup-box pre {
+            margin: 0;
+            font-family: 'Courier New', monospace;
+            font-size: 10.5px;
+            line-height: 1.65;
+            white-space: pre;
+        }
+        #popup-box .pmat { color: #66ffcc; }
+        #popup-box .pvec { color: #ff9999; }
+        #popup-box .phint { color: #445; font-size: 10px; margin-top: 4px; }
+    </style>
+</head>
+<body>
+
+<div id="upload-bar">
+    <input type="file" id="pdb-input" accept=".pdb,.txt" style="display:none">
+    <button id="btn-pdb">Load PDB</button>
+    <button id="btn-helix">Alpha-Helix (15 res)</button>
+    <button id="btn-sheet">Beta-Hairpin (16 res)</button>
+    <button id="btn-1mh1">Load protein "1MH1"</button>
+    <span id="protein-name">pick a structure to begin</span>
+</div>
+
+<div id="popup-box">
+    <div class="pinstr">Choose residue index using the 'Selected' slider to display its orientation frame.</div>
+    <div class="ptitle" id="popup-title"></div>
+    <div id="popup-content"></div>
+</div>
+
+<script type="module">
+
+import * as THREE from 'three';
+import { ThreeEngine, get_default_lil_gui } from './js/utils/utils_three.js';
+
+const vadd = (a, b) => [a[0]+b[0], a[1]+b[1], a[2]+b[2]];
+const vsub = (a, b) => [a[0]-b[0], a[1]-b[1], a[2]-b[2]];
+const vscl = (a, s) => [a[0]*s, a[1]*s, a[2]*s];
+const vdot = (a, b) => a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
+const vcros = (a, b) => [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+const vlen = a => Math.sqrt(vdot(a, a));
+const vnorm = a => { const l = vlen(a); return l < 1e-12 ? [0, 0, 1] : vscl(a, 1/l); };
+
+const arr2v3 = ([x, y, z]) => new THREE.Vector3(x, z, -y);
+
+const SCALE = 0.1;
+
+function parsePDB(text) {
+    const map = new Map();
+    let firstChain = null;
+    for (const line of text.split('\n')) {
+        if (!line.startsWith('ATOM')) continue;
+        const atom = line.substring(12, 16).trim();
+        if (!['N', 'CA', 'C'].includes(atom)) continue;
+        const chain = line.substring(21, 22);
+        if (firstChain === null) firstChain = chain;
+        if (chain !== firstChain) continue;
+        const resSeq = parseInt(line.substring(22, 26));
+        if (!map.has(resSeq)) map.set(resSeq, { resNum: resSeq, n: null, ca: null, c: null });
+        const r = map.get(resSeq);
+        const xyz = [
+            parseFloat(line.substring(30, 38)),
+            parseFloat(line.substring(38, 46)),
+            parseFloat(line.substring(46, 54))
+        ];
+        if (atom === 'N')  r.n  = xyz;
+        if (atom === 'CA') r.ca = xyz;
+        if (atom === 'C')  r.c  = xyz;
+    }
+    return [...map.values()]
+        .filter(r => r.n && r.ca && r.c)
+        .sort((a, b) => a.resNum - b.resNum);
+}
+
+function buildSE3Frame(n, ca, c) {
+    const v1 = vsub(ca, n);
+    const v2 = vsub(c, n);
+    const e1 = vnorm(v1);
+    const e2 = vnorm(vsub(v2, vscl(e1, vdot(v2, e1))));
+    const e3 = vcros(e1, e2);
+    const R = [
+        [e1[0], e2[0], e3[0]],
+        [e1[1], e2[1], e3[1]],
+        [e1[2], e2[2], e3[2]],
+    ];
+    return { R, t: ca, e1, e2, e3 };
+}
+
+function rotMatToQuat(R) {
+    const tr = R[0][0] + R[1][1] + R[2][2];
+    let w, x, y, z;
+    if (tr > 0) {
+        const s = 0.5 / Math.sqrt(tr + 1);
+        w = 0.25 / s;
+        x = (R[2][1] - R[1][2]) * s;
+        y = (R[0][2] - R[2][0]) * s;
+        z = (R[1][0] - R[0][1]) * s;
+    } else if (R[0][0] > R[1][1] && R[0][0] > R[2][2]) {
+        const s = 2 * Math.sqrt(1 + R[0][0] - R[1][1] - R[2][2]);
+        w = (R[2][1] - R[1][2]) / s;
+        x = 0.25 * s;
+        y = (R[0][1] + R[1][0]) / s;
+        z = (R[0][2] + R[2][0]) / s;
+    } else if (R[1][1] > R[2][2]) {
+        const s = 2 * Math.sqrt(1 + R[1][1] - R[0][0] - R[2][2]);
+        w = (R[0][2] - R[2][0]) / s;
+        x = (R[0][1] + R[1][0]) / s;
+        y = 0.25 * s;
+        z = (R[1][2] + R[2][1]) / s;
+    } else {
+        const s = 2 * Math.sqrt(1 + R[2][2] - R[0][0] - R[1][1]);
+        w = (R[1][0] - R[0][1]) / s;
+        x = (R[0][2] + R[2][0]) / s;
+        y = (R[1][2] + R[2][1]) / s;
+        z = 0.25 * s;
+    }
+    const l = Math.sqrt(w*w + x*x + y*y + z*z);
+    return [w/l, x/l, y/l, z/l];
+}
+
+function frameToDualQuat(R, t) {
+    const [qrw, qrx, qry, qrz] = rotMatToQuat(R);
+    const [tx, ty, tz] = t;
+    const dw = -(tx*qrx + ty*qry + tz*qrz);
+    const dx = tx*qrw + ty*qrz - tz*qry;
+    const dy = -tx*qrz + ty*qrw + tz*qrx;
+    const dz = tx*qry - ty*qrx + tz*qrw;
+    const qr = [qrw, qrx, qry, qrz];
+    const qd = [0.5*dw, 0.5*dx, 0.5*dy, 0.5*dz];
+    const sinH = Math.sqrt(qrx*qrx + qry*qry + qrz*qrz);
+    const angle_rad = 2 * Math.atan2(sinH, Math.abs(qrw));
+    const axis = sinH > 1e-7 ? [qrx/sinH, qry/sinH, qrz/sinH] : [1, 0, 0];
+    return { qr, qd, angle_deg: angle_rad * 180 / Math.PI, axis };
+}
+
+function centerResidues(residues) {
+    if (residues.length === 0) return residues;
+    let cx = 0, cy = 0, cz = 0;
+    for (const r of residues) { cx += r.ca[0]; cy += r.ca[1]; cz += r.ca[2]; }
+    cx /= residues.length; cy /= residues.length; cz /= residues.length;
+    const c = [cx, cy, cz];
+    return residues.map(r => ({ ...r, n: vsub(r.n, c), ca: vsub(r.ca, c), c: vsub(r.c, c) }));
+}
+
+function computeFrames(residues) {
+    return residues.map(res => {
+        const f = buildSE3Frame(res.n, res.ca, res.c);
+        const dq = frameToDualQuat(f.R, f.t);
+        return { ...f, ...dq, resNum: res.resNum };
+    });
+}
+
+function generateAlphaHelix(n = 15) {
+    const r = 2.3, d = 1.5, tau = 100 * Math.PI / 180;
+    const cas = Array.from({length: n}, (_, i) =>
+        [r * Math.cos(i*tau), r * Math.sin(i*tau), i*d]);
+    return cas.map((ca, i) => {
+        const prev = cas[i-1] ?? [r*Math.cos(-tau), r*Math.sin(-tau), -d];
+        const next = cas[i+1] ?? [r*Math.cos((i+1)*tau), r*Math.sin((i+1)*tau), (i+1)*d];
+        return {
+            resNum: i + 1,
+            n: vadd(ca, vscl(vnorm(vsub(prev, ca)), 1.46)),
+            ca,
+            c: vadd(ca, vscl(vnorm(vsub(next, ca)), 1.52))
+        };
+    });
+}
+
+function generateBetaHairpin(strandLen = 8) {
+    const residues = [];
+    let rn = 1;
+    for (let i = 0; i < strandLen; i++) {
+        const alt = (i % 2) * 0.5;
+        const ca = [0, i * 3.3, alt];
+        const sgn = (i % 2 === 0) ? 1 : -1;
+        residues.push({
+            resNum: rn++,
+            n: vadd(ca, vscl(vnorm([-0.8, -1.2, sgn*0.4]), 1.46)),
+            ca,
+            c: vadd(ca, vscl(vnorm([0.8, 1.2, sgn*0.4]), 1.52))
+        });
+    }
+    for (let i = 0; i < strandLen; i++) {
+        const j = strandLen - 1 - i;
+        const alt = (j % 2) * 0.5;
+        const ca = [4.8, j * 3.3, alt];
+        const sgn = (j % 2 === 0) ? -1 : 1;
+        residues.push({
+            resNum: rn++,
+            n: vadd(ca, vscl(vnorm([0.8, 1.2, sgn*0.4]), 1.46)),
+            ca,
+            c: vadd(ca, vscl(vnorm([-0.8, -1.2, sgn*0.4]), 1.52))
+        });
+    }
+    return residues;
+}
+
+const engine = ThreeEngine.new_default_3d();
+
+Object.assign(engine.stats.dom.style, { top: 'auto', bottom: '8px', left: 'auto', right: '8px' });
+
+const settings = {
+    mode: 'SE(3) Frames',
+    showRope: true,
+    showAxes: true,
+    axisLength: 0.4,
+    selectedRes: 0,
+};
+
+const gui = get_default_lil_gui();
+Object.assign(gui.domElement.style, {
+    position: 'fixed', top: '44px', left: '8px', right: 'auto', zIndex: '150'
+});
+
+const visF = gui.addFolder('Visualization');
+visF.add(settings, 'mode', ['SE(3) Frames', 'Dual Quaternion']).name('View Mode');
+visF.add(settings, 'showRope').name('Backbone Rope');
+visF.add(settings, 'showAxes').name('Frame Axes');
+visF.add(settings, 'axisLength', 0.1, 1.0, 0.05).name('Axis Length');
+
+const resF = gui.addFolder('Residue');
+let resCtrl = resF.add(settings, 'selectedRes', 0, 0, 1).name('Selected #');
+
+let ropeMeshes = [];
+let frames = [];
+
+function rebuildRope() {
+    ropeMeshes.forEach(m => engine.scene.remove(m));
+    ropeMeshes = [];
+    if (frames.length < 2) return;
+
+    const mat = new THREE.MeshStandardMaterial({ color: 0x5577cc, roughness: 0.4, metalness: 0.2 });
+    const segments = [[]];
+
+    for (let i = 0; i < frames.length; i++) {
+        const f = frames[i];
+        if (i > 0 && vlen(vsub(f.t, frames[i-1].t)) > 8.0) segments.push([]);
+        segments[segments.length-1].push(arr2v3(f.t.map(v => v * SCALE)));
+    }
+
+    for (const pts of segments) {
+        if (pts.length < 2) continue;
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const geo = new THREE.TubeGeometry(curve, Math.max(pts.length * 4, 8), 0.028, 8, false);
+        const mesh = new THREE.Mesh(geo, mat);
+        engine.scene.add(mesh);
+        ropeMeshes.push(mesh);
+    }
+}
+
+function fitCamera() {
+    if (frames.length === 0) return;
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+    let minZ = Infinity, maxZ = -Infinity;
+    for (const f of frames) {
+        const [x, y, z] = f.t.map(v => v * SCALE);
+        minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+        minY = Math.min(minY, y); maxY = Math.max(maxY, y);
+        minZ = Math.min(minZ, z); maxZ = Math.max(maxZ, z);
+    }
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const cz = (minZ + maxZ) / 2;
+    const size = Math.max(maxX - minX, maxY - minY, maxZ - minZ, 0.5);
+    const target = new THREE.Vector3(cx, cz, -cy);
+    const dist = size * 1.6 + 1.2;
+    engine.camera.position.set(target.x + dist*0.5, target.y + dist*0.45, target.z + dist*0.85);
+    engine.camera.lookAt(target);
+    engine.controls.target.copy(target);
+    engine.controls.update();
+}
+
+function loadProtein(residues, name) {
+    frames = computeFrames(centerResidues(residues));
+    settings.selectedRes = 0;
+    resCtrl.min(0).max(Math.max(frames.length - 1, 0)).step(1);
+    resCtrl.updateDisplay();
+    rebuildRope();
+    fitCamera();
+    document.getElementById('protein-name').textContent = name + '  (' + frames.length + ' residues)';
+}
+
+document.getElementById('btn-pdb').addEventListener('click', () =>
+    document.getElementById('pdb-input').click());
+
+document.getElementById('pdb-input').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+        const residues = parsePDB(ev.target.result);
+        if (!residues.length) {
+            alert('No complete backbone residues (N, CA, C) found.');
+            return;
+        }
+        loadProtein(residues, file.name);
+    };
+    reader.readAsText(file);
+});
+
+document.getElementById('btn-1mh1').addEventListener('click', () => {
+    fetch('./1MH1.pdb')
+        .then(r => r.text())
+        .then(text => {
+            const residues = parsePDB(text);
+            if (!residues.length) { alert('Could not parse 1MH1.pdb.'); return; }
+            loadProtein(residues, '1MH1');
+        });
+});
+
+document.getElementById('btn-1mh1').addEventListener('click', () => {
+    fetch('./1MH1.pdb')
+        .then(r => r.text())
+        .then(text => {
+            const residues = parsePDB(text);
+            if (!residues.length) { alert('Could not parse 1MH1.pdb.'); return; }
+            loadProtein(residues, '1MH1');
+        });
+});
+
+document.getElementById('btn-helix').addEventListener('click', () =>
+    loadProtein(generateAlphaHelix(15), 'Idealized Alpha-Helix'));
+
+document.getElementById('btn-sheet').addEventListener('click', () =>
+    loadProtein(generateBetaHairpin(8), 'Idealized Beta-Hairpin'));
+
+function updatePopup(f) {
+    const { R, t, qr, qd, resNum } = f;
+    function p(v) { return (v >= 0 ? ' ' : '') + v.toFixed(4); }
+    const row = i => '| ' + p(R[i][0]) + '  ' + p(R[i][1]) + '  ' + p(R[i][2]) + '  ' + p(t[i]) + ' |';
+
+    document.getElementById('popup-title').textContent = 'Residue ' + resNum;
+    document.getElementById('popup-content').innerHTML =
+        '<div class="psub">4x4 SE(3) Homogeneous Matrix</div>' +
+        '<pre class="pmat">' +
+        row(0) + '\n' + row(1) + '\n' + row(2) + '\n' +
+        '|  0.0000   0.0000   0.0000   1.0000 |' +
+        '</pre>' +
+        '<div class="psub">Dual Quaternion  q = q_r + eps * q_d</div>' +
+        '<pre class="pvec">' +
+        'q_r = [' + qr.map(p).join(', ') + ']\n' +
+        'q_d = [' + qd.map(p).join(', ') + ']' +
+        '</pre>' +
+        '<div class="phint">q_d = (1/2) * t_pure * q_r</div>';
+}
+
+engine.animation_loop(() => {
+    if (!frames.length) return;
+
+    const len = settings.axisLength;
+    const sel = Math.round(settings.selectedRes);
+    const isDQ = settings.mode === 'Dual Quaternion';
+
+    ropeMeshes.forEach(m => m.visible = settings.showRope);
+
+    for (let i = 0; i < frames.length; i++) {
+        const f = frames[i];
+        const origin = f.t.map(v => v * SCALE);
+        const isSel = (i === sel);
+        const sphRad = isSel ? 0.095 : 0.045;
+        const sphCol = isSel ? 0x00ffff : 0xffcc00;
+
+        if (isDQ) {
+            if (settings.showAxes) {
+                const aw = isSel ? 0.006 : 0.003;
+                engine.draw_debug_vector(origin, vadd(origin, vscl(f.e1, len*0.45)), aw, 0.04, 0xbb3333);
+                engine.draw_debug_vector(origin, vadd(origin, vscl(f.e2, len*0.45)), aw, 0.04, 0x33bb33);
+                engine.draw_debug_vector(origin, vadd(origin, vscl(f.e3, len*0.45)), aw, 0.04, 0x3333bb);
+            }
+            const ext = len * 0.75;
+            engine.draw_debug_line(vsub(origin, vscl(f.axis, ext)), vadd(origin, vscl(f.axis, ext)),
+                false, isSel ? 0.018 : 0.010, 0xffaa00);
+            engine.draw_debug_vector([0, 0, 0], origin, 0.005, 0.07, isSel ? 0xffffff : 0xaaaaaa);
+            engine.draw_debug_sphere(origin, sphRad, sphCol);
+        } else {
+            if (settings.showAxes) {
+                const aw = isSel ? 0.013 : 0.007;
+                const ah = isSel ? 0.10 : 0.07;
+                engine.draw_debug_vector(origin, vadd(origin, vscl(f.e1, len)), aw, ah, 0xff2222);
+                engine.draw_debug_vector(origin, vadd(origin, vscl(f.e2, len)), aw, ah, 0x22dd22);
+                engine.draw_debug_vector(origin, vadd(origin, vscl(f.e3, len)), aw, ah, 0x2222ff);
+            }
+            engine.draw_debug_sphere(origin, sphRad, sphCol);
+        }
+    }
+
+    if (sel < frames.length) updatePopup(frames[sel]);
+});
+
+loadProtein(generateAlphaHelix(15), 'Idealized Alpha-Helix');
+
+</script>
+</body>
+</html>
